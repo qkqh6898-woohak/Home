@@ -1,0 +1,53 @@
+name: 데이터 갱신과 배포
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 21 * * *"   # 매일 06:23 (한국 시간)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  update-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 데이터 만들기
+        env:
+          ECOS_KEY: ${{ secrets.ECOS_KEY }}
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+        run: python3 scripts/update.py
+
+      - name: 데이터 저장 (정기 실행일 때만 main에 커밋)
+        if: github.event_name != 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/data
+          if ! git diff --cached --quiet; then
+            git commit -m "데이터 갱신 $(TZ=Asia/Seoul date +%F)"
+            git pull --rebase origin main
+            git push origin HEAD:main || echo "push 실패: 다음 실행에서 다시 시도"
+          fi
+
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app
+      - id: deployment
+        uses: actions/deploy-pages@v4
